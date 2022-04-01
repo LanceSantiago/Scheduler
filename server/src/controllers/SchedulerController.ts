@@ -7,6 +7,7 @@ const { MongoClient } = require("mongodb");
 const url = mongoCreds.uri;
 const client = new MongoClient(url);
 
+const API_PASSWORD = "password"
 
 @Controller('api/schedule')
 class SchedulerController {
@@ -32,7 +33,8 @@ class SchedulerController {
     @Post('appointment')
     public async postAppointment(_req: Request, res: Response) {
         if ( !("time" in _req.body) || !("group" in _req.body) ) {
-            res.status(StatusCodes.BAD_REQUEST).send("Please specify a timeslot in the format of HH:MM:SS and your group name.");
+            res.status(StatusCodes.BAD_REQUEST).send("Please specify a timeslot in the format of HH:MM:SS, \
+            and a group name.");
             return;
         }
         try {
@@ -40,6 +42,14 @@ class SchedulerController {
             const db = client.db('scheduler');
             const col = db.collection("timeslots");
             let { time, group } = _req.body; // Format: HH:MM:SS
+
+            // Check if group has scheduled an appointment already.
+            let groupFind = await col.findOne( { "group": group } )
+            if ( groupFind ) {
+                res.status(StatusCodes.UNAUTHORIZED).send("You have already booked an appointment at: " 
+                + groupFind.time);
+                return;
+            }
             let filter = {time: time};
             const updateDoc = {
                 $set: {
@@ -59,8 +69,13 @@ class SchedulerController {
     // Frees up appointments
     @Delete('appointment')
     public async deleteAppointment(_req: Request, res: Response) {
-        if ( !("time" in _req.body) || !("group" in _req.body) ) {
-            res.status(StatusCodes.BAD_REQUEST).send("Please specify a timeslot in the format of HH:MM:SS and your group name.");
+        if ( !("time" in _req.body) || !("group" in _req.body) || !("password" in _req.body) ) {
+            res.status(StatusCodes.BAD_REQUEST).send("Please specify a timeslot in the format of HH:MM:SS, \
+            a group name and the password.");
+            return;
+        }
+        if (_req.body.password != API_PASSWORD) { 
+            res.status(StatusCodes.UNAUTHORIZED).send("Wrong Password.")
             return;
         }
         try {
@@ -86,11 +101,17 @@ class SchedulerController {
     // Adds Timeslots
     @Post('timeslot')
     public async postTimeslot(_req: Request, res: Response) {
-        if ( !("time" in _req.body) ) {
-            res.status(StatusCodes.BAD_REQUEST).send("Please specify a timeslot in the format of HH:MM:SS");
+        if ( !("time" in _req.body) || !("password" in _req.body) ) {
+            res.status(StatusCodes.BAD_REQUEST).send("Please specify a timeslot in the format of HH:MM:SS and the password.");
             return;
         }
-        // I should probably check to make sure time is formatted as HH:MM:SS, though only I will be adding time, shouldn't matter for now.
+
+        if (_req.body.password != API_PASSWORD) { 
+            res.status(StatusCodes.UNAUTHORIZED).send("Wrong Password.")
+            return;
+        }
+        // I should probably check to make sure time is formatted as HH:MM:SS, 
+        // though only I will be adding time, shouldn't matter for now.
         try {
             await client.connect();
             const db = client.db('scheduler');
@@ -104,10 +125,14 @@ class SchedulerController {
                 "date": new Date(2022, 4, 8), // April 8, 2022
                 "group": ""                                                                                                            
             }
+            
+            // Eventually change insertOne to updateOne with const options = { upsert: true };.
+            // To avoid any duplicates.
             await col.insertOne(newTimeSlot);
             res.status(StatusCodes.OK).send("Timeslot added at: " + date);
         } catch {
-            res.status(StatusCodes.BAD_REQUEST).send("Could not add additional timeslots. Please ensure that you are specifying a timeslot in the format of HH:MM:SS");
+            res.status(StatusCodes.BAD_REQUEST).send("Could not add additional timeslots. \
+            Please ensure that you are specifying a timeslot in the format of HH:MM:SS");
         } finally {
             await client.close();
         }
