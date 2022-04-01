@@ -6,6 +6,9 @@ import * as path from 'path';
 import Controllers from './controllers';
 import { PUBLIC_PATHS } from './utils/constants';
 import mongoCreds from './utils/mongodbcreds.json'
+const { MongoClient } = require("mongodb");
+const url = mongoCreds.uri;
+const client = new MongoClient(url);
 
 class Scheduler extends Server {
 
@@ -15,6 +18,7 @@ class Scheduler extends Server {
         super(true);
         this.app.use(bodyParser.json());
         this.app.use(bodyParser.urlencoded({ extended: true }));
+        this.checkMongo();
         this.setupControllers();
         this.app.all(/api\/.*/, (_req, res) => res.status(StatusCodes.NOT_ACCEPTABLE).end());
     }
@@ -30,20 +34,18 @@ class Scheduler extends Server {
         }
         super.addControllers(ctlrInstances);
     }
-
-    private setupMongo(): void {
-        const { MongoClient, ServerApiVersion } = require('mongodb');
-        const uri = mongoCreds.uri;
-        const client = new MongoClient(uri, { useNewUrlParser: true, useUnifiedTopology: true, serverApi: ServerApiVersion.v1 });
-        client.connect(() => {
-            try {
-                const collection = client.db("test").collection("devices");
-                // perform actions on the collection object
-                client.close();
-            } catch(exception) {
-                console.log(exception);
-            }        
-});
+    
+    private checkMongo(): void {
+        try {
+            client.connect();
+            console.log("Connected to Mongo Server");
+        } catch (err: any) {
+            console.log("Mongo Servr - Error Occured:\n")
+            console.log(err.stack);
+        }
+        finally {
+            client.close();
+        }
     }
 }
 
