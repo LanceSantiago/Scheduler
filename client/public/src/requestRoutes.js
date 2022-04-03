@@ -18,10 +18,35 @@ function getAllTimeslots() {
         if ( data.message ) {
             $('#table').html(`<p> ${data.message} </p`)
         } else { 
+            
             $('#table').html(makeTable(data))
         }
     }).fail((data, textStatus, xhr) => {
         console.log(data);
         console.log(textStatus);
     })
+}
+
+function postTimeslot(group, time) {
+    let payload = { 'group': group, 'time': time };
+    $.ajax({
+        url: `${API_URL_PREFIX}/appointment/`,
+        method: 'POST',
+        contentType: 'application/json;charset=UTF-8',
+        data: JSON.stringify(payload),
+    }).done((data) => {
+        if ( data ) {
+            $('#error').html(`<p> ${data} </p`)
+            getAllTimeslots();
+        } else { 
+            $('#error').html('An error has occured.')
+            
+        }
+    }).fail((data, textStatus, xhr) => {
+        $('#error').html(`<p> ${data.responseText} </p`)
+        console.log(xhr.status);
+        console.log(data);
+        console.log(textStatus);
+    })
+
 }

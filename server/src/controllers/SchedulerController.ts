@@ -1,13 +1,39 @@
 import { Controller, Get, Post, Delete } from '@overnightjs/core';
 import { Request, Response } from 'express';
 import { StatusCodes } from 'http-status-codes';
-import mongoCreds from '../utils/mongodbcreds.json'
+import mongoCreds from '../utils/mongodbcreds.json';
+import * as fs from 'fs';
 
 const { MongoClient } = require("mongodb");
 const url = mongoCreds.uri;
 const client = new MongoClient(url);
 
 const API_PASSWORD = "password"
+const GROUP_NAMES = ['.wav', 'Activision', 'allAboardGames',
+'BC HUB', 'Dakshs Kittens (listeme)', 'DeerChat',
+'Drawble', 'DSC++', 'GDSC2.0', 'GiveNet', 'Inwit',
+'Its not a bug, its a feature', 'Microsoft',
+'neverOvertime', 'Planners Paradice', 'QTC301',
+'SigmaTech', 'Solhunt', 'Something Random',
+'Stellar', 'StudyTogether', 'UTMarketplace'];
+
+function timeSlotGenerator() {
+    let timeslot = ['09:00:00', '09:20:00', '09:40:00']
+    let startTimeHour = 10;
+    let currMin = 0;
+
+    for ( let i = 0; i < 28; i++ ) {
+        let extraZero = '';
+        if (currMin == 0) extraZero += '0'
+        timeslot.push(`${startTimeHour.toString()}:${extraZero}${currMin.toString()}:00`);
+        currMin += 20;
+        if ( currMin >= 60) {
+            startTimeHour += 1;
+            currMin = 0;
+        }
+    }
+    return timeslot;
+}
 
 @Controller('api/schedule')
 class SchedulerController {
@@ -50,13 +76,21 @@ class SchedulerController {
                 + groupFind.time);
                 return;
             }
+            
+            // Checks to see if someone has booked the timeslot.
+            let timeFind = await col.findOne( { "time": time } )
+            if ( timeFind.group != '' ) {
+                res.status(StatusCodes.UNAUTHORIZED).send(`Group ${timeFind.group} \
+                has currently booked the timeslot ${timeFind.time}`);
+                return;
+            }
             let filter = {time: time};
             const updateDoc = {
                 $set: {
                     group: group
                 },
             };
-            // I should add some checker to this to see if someone has booked the timeslot or not.
+
             await col.updateOne(filter, updateDoc);
             res.status(StatusCodes.OK).send("You have booked an appointment for: " + time);
         } catch {
@@ -120,15 +154,20 @@ class SchedulerController {
             let timeSplit = time.split(':');
             let date = new Date(2022, 4, 8);
             date.setHours(parseInt(timeSplit[0]), parseInt(timeSplit[1]), parseInt(timeSplit[2]));
-            let newTimeSlot = {
-                "time": time,
-                "date": new Date(2022, 4, 8), // April 8, 2022
-                "group": ""                                                                                                            
-            }
             
             // Eventually change insertOne to updateOne with const options = { upsert: true };.
             // To avoid any duplicates.
-            await col.insertOne(newTimeSlot);
+
+            let filter = {time: time};
+            let options = { upsert: true };
+            const updateDoc = {
+                $set: {
+                    'time': time,
+                    'date': new Date(2022, 4, 8), // April 8, 2022
+                    'group': '' 
+                },
+            };
+            await col.updateOne(filter, updateDoc, options); 
             res.status(StatusCodes.OK).send("Timeslot added at: " + date);
         } catch {
             res.status(StatusCodes.BAD_REQUEST).send("Could not add additional timeslots. \
@@ -136,6 +175,70 @@ class SchedulerController {
         } finally {
             await client.close();
         }
+    }
+    @Delete('reset')
+    public async postReset(_req: Request, res: Response) {
+        if ( !("password" in _req.body) ) {
+            res.status(StatusCodes.BAD_REQUEST).send("Please specify the password.");
+            return;
+        }
+
+        if (_req.body.password != API_PASSWORD) { 
+            res.status(StatusCodes.UNAUTHORIZED).send("Wrong Password.")
+            return;
+        }
+        try {
+            await client.connect();
+            const db = client.db('scheduler');
+            const col = db.collection("timeslots");
+            let timeslots = timeSlotGenerator();
+            let date = new Date(2022, 4, 8);
+            for ( let i = 0; i < timeslots.length; i++ ){
+                date.setHours(parseInt(timeslots[i].substring(0,2)), parseInt(timeslots[i].substring(3,5)),0);
+                let filter = {time: timeslots[i]};
+                let options = { upsert: true };
+                const updateDoc = {
+                    $set: {
+                        'time': timeslots[i],
+                        'date': new Date(2022, 4, 8), // April 8, 2022
+                        'group': '' 
+                    },
+                }
+                await col.updateOne(filter, updateDoc, options); 
+            };
+            res.status(StatusCodes.OK).send('Database has been reset.');
+        } catch(err) {
+            console.log(err);
+            res.status(StatusCodes.BAD_REQUEST).send("Something went wrong.");
+        } finally {
+            await client.close();
+        }
+    }
+
+    @Get('backup')
+    public async backupTimeslots(_req: Request, res: Response){
+        try {
+            await client.connect();
+            const db = client.db('scheduler');
+            const col = db.collection("timeslots");
+            let appointments = await col.find().toArray()
+            let currDate = new Date();
+
+            let file = fs.createWriteStream(__dirname +`/${currDate.getDate()}-${currDate.getDay()}-\
+${currDate.getFullYear()}--${currDate.getHours()}-${currDate.getMinutes()}-backup.json`);
+            file.on('error', function(err) { console.log('error while writing to file') });
+            for (let i = 0; i < appointments.length; i++) {
+                file.write(JSON.stringify(appointments[i])+'\n')
+            }
+            file.end();
+            res.status(StatusCodes.OK).send('File has been backed up.');
+        } catch(err) {
+            console.log(err);
+            res.status(StatusCodes.BAD_REQUEST).send("Something went wrong.");
+        } finally {
+            await client.close();
+        }
+        
     }
 }
 
